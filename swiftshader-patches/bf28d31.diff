@@ -1,0 +1,53 @@
+From bf28d3144ca0847c4dd3db7a188b2e0d83e0b4b4 Mon Sep 17 00:00:00 2001
+From: nihui <shuizhuyuanluo@gmail.com>
+Date: Wed, 01 Jul 2026 15:45:27 +0800
+Subject: [PATCH] Subzero: Fix cmpxchg branch folding across phi assignments
+
+The x86 cmpxchg/cmp/br optimization reuses the flags produced by
+cmpxchg and removes the explicit compare. This is only valid if the
+compare operands are unchanged between cmpxchg and the branch.
+
+If an intervening phi assignment rewrites either compare operand, the
+original compare observes the post-phi value, while the cmpxchg flags
+were computed from the pre-phi value. Reusing those flags can take the
+wrong CAS-loop branch and lose updates.
+
+Keep the optimization for the normal case, but fall back to the explicit
+compare when an intervening phi assignment updates either compare
+operand.
+
+Change-Id: Ib699c1652a45a7c20963576bb546f5f85940d5f4
+---
+
+diff --git a/third_party/subzero/src/IceTargetLoweringX8632.cpp b/third_party/subzero/src/IceTargetLoweringX8632.cpp
+index 6875c8a..b74ecdc 100644
+--- a/third_party/subzero/src/IceTargetLoweringX8632.cpp
++++ b/third_party/subzero/src/IceTargetLoweringX8632.cpp
+@@ -4387,6 +4387,11 @@
+            (NextCmp->getSrc(1) == Dest && NextCmp->getSrc(0) == Expected)))) {
+       return false;
+     }
++    for (InstAssign *PhiAssign : PhiAssigns) {
++      if (PhiAssign->getDest() == NextCmp->getSrc(0) ||
++          PhiAssign->getDest() == NextCmp->getSrc(1))
++        return false;
++    }
+     NextInst = Context.getNextInst(I);
+     if (!NextInst)
+       return false;
+diff --git a/third_party/subzero/src/IceTargetLoweringX8664.cpp b/third_party/subzero/src/IceTargetLoweringX8664.cpp
+index 13f8f85..3a4b28a 100644
+--- a/third_party/subzero/src/IceTargetLoweringX8664.cpp
++++ b/third_party/subzero/src/IceTargetLoweringX8664.cpp
+@@ -3903,6 +3903,11 @@
+            (NextCmp->getSrc(1) == Dest && NextCmp->getSrc(0) == Expected)))) {
+       return false;
+     }
++    for (InstAssign *PhiAssign : PhiAssigns) {
++      if (PhiAssign->getDest() == NextCmp->getSrc(0) ||
++          PhiAssign->getDest() == NextCmp->getSrc(1))
++        return false;
++    }
+     NextInst = Context.getNextInst(I);
+     if (!NextInst)
+       return false;
